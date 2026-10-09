@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>視力挑戰賽 - Teachable Machine AI 辨識</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- TensorFlow.js & Teachable Machine Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+    body {
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    }
+    .pulse-ring {
+      box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5);
+      animation: pulse-animation 1.5s infinite;
+    }
+    @keyframes pulse-animation {
+      0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.6); }
+      70% { box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+    }
+  </style>
+</head>
+<body class="h-full flex flex-col justify-between overflow-x-hidden selection:bg-blue-500 selection:text-white">
+
+  <!-- Top Navigation Header -->
+  <header class="w-full bg-slate-900/80 backdrop-blur-md border-b border-slate-800 px-4 py-3 flex justify-between items-center z-20">
+    <div class="flex items-center space-x-3">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/30">
+        <i class="fa-solid fa-eye text-white text-lg"></i>
+      </div>
+      <div>
+        <h1 class="font-bold text-base md:text-lg text-white leading-tight">AI 視力挑戰賽</h1>
+        <p class="text-xs text-slate-400">Teachable Machine 辨識</p>
+      </div>
+    </div>
+
+    <!-- Header Actions -->
+    <div class="flex items-center space-x-2 md:space-x-3">
+      <button id="btn-pause" onclick="togglePause()" class="hidden bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs md:text-sm font-semibold transition border border-slate-700 flex items-center gap-1.5">
+        <i class="fa-solid fa-pause"></i> <span>暫停</span>
+      </button>
+      <button id="btn-open-modal" onclick="openModelModal()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs md:text-sm font-semibold transition shadow-md shadow-blue-600/20 flex items-center gap-1.5">
+        <i class="fa-solid fa-gear"></i> <span id="model-btn-text">設定模型</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Game Workspace -->
+  <main class="flex-1 max-w-6xl w-full mx-auto p-3 md:p-6 flex flex-col lg:flex-row gap-6 justify-center items-center relative">
+    
+    <!-- Game Board (E-chart Area) -->
+    <div class="flex-1 w-full flex flex-col items-center justify-center bg-slate-900/60 border border-slate-800/80 rounded-3xl p-6 md:p-10 relative overflow-hidden min-h-[380px] md:min-h-[480px] shadow-2xl">
+      
+      <!-- Top Game Status Stats -->
+      <div id="game-stats" class="absolute top-4 left-4 right-4 flex justify-between items-center text-xs md:text-sm font-medium text-slate-400">
+        <div class="flex items-center gap-2 bg-slate-950/70 px-3 py-1.5 rounded-full border border-slate-800">
+          <span>視力等級:</span>
+          <span id="stat-level" class="text-blue-400 font-bold text-base">0.1</span>
+        </div>
+        <div class="flex items-center gap-2 bg-slate-950/70 px-3 py-1.5 rounded-full border border-slate-800">
+          <span>進度:</span>
+          <span id="stat-round" class="text-emerald-400 font-bold">第 1 / 2 題</span>
+        </div>
+        <div class="flex items-center gap-2 bg-slate-950/70 px-3 py-1.5 rounded-full border border-slate-800">
+          <span>得分:</span>
+          <span id="stat-score" class="text-amber-400 font-bold">0</span>
+        </div>
+      </div>
+
+      <!-- Snellen E Target Container (No Direction Hints Allowed) -->
+      <div id="e-container" class="my-auto flex items-center justify-center transition-all duration-300 transform scale-100 py-6">
+        <div id="e-symbol" class="transition-transform duration-300 flex items-center justify-center text-slate-100 drop-shadow-[0_0_20px_rgba(255,255,255,0.15)]">
+          <!-- E SVG Icon with adjustable rotation and dynamic size -->
+          <svg id="e-svg" viewBox="0 0 100 100" class="w-32 h-32 md:w-40 md:h-40 transition-all duration-300">
+            <path fill="currentColor" d="M 10,10 H 90 V 28 H 32 V 41 H 80 V 59 H 32 V 72 H 90 V 90 H 10 Z"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Bottom Gesture Guidance & Feedback (Pure status, no hints) -->
+      <div id="status-banner" class="w-full text-center mt-4">
+        <div id="status-text" class="text-slate-300 font-medium text-sm md:text-base animate-pulse">
+          請比出姿勢回答 E 的開口方向...
+        </div>
+      </div>
+
+      <!-- Holding Radial Progress Overlay -->
+      <div id="hold-progress-bar-container" class="absolute bottom-4 left-1/2 -translate-x-1/2 w-3/4 max-w-md h-2 bg-slate-800 rounded-full overflow-hidden hidden">
+        <div id="hold-progress-bar" class="h-full bg-gradient-to-r from-blue-500 to-indigo-500 w-0 transition-all duration-75"></div>
+      </div>
+    </div>
+
+    <!-- Webcam Feed & AI Detection Sidepanel -->
+    <div class="w-full lg:w-80 flex flex-col gap-4">
+      <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl">
+        <div class="flex justify-between items-center mb-3">
+          <h2 class="text-sm font-semibold text-slate-300 flex items-center gap-2">
+            <i class="fa-solid fa-camera text-blue-400"></i> AI 鏡頭偵測
+          </h2>
+          <span id="ai-status-badge" class="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full border border-slate-700">
+            尚未連接模型
+          </span>
+        </div>
+
+        <!-- Webcam Stream Canvas -->
+        <div class="relative w-full aspect-video bg-slate-950 rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center">
+          <div id="webcam-container" class="w-full h-full flex items-center justify-center">
+            <div id="webcam-placeholder" class="text-center p-4 text-slate-500">
+              <i class="fa-solid fa-video-slash text-3xl mb-2"></i>
+              <p class="text-xs">請點擊「設定模型」載入 AI</p>
+            </div>
+          </div>
+          <div id="detected-gesture-badge" class="absolute top-2 right-2 bg-blue-600/90 backdrop-blur-md text-white text-xs font-bold px-2.5 py-1 rounded-lg border border-blue-400/30 hidden">
+            <span id="current-gesture-name">defaut</span>
+          </div>
+        </div>
+
+        <!-- Probability Confidence Bars -->
+        <div class="mt-4 space-y-2">
+          <div class="text-xs text-slate-400 font-medium mb-1">各類別即時信心度：</div>
+          
+          <!-- UP -->
+          <div>
+            <div class="flex justify-between text-[11px] text-slate-400 mb-0.5">
+              <span>⬆️ up</span>
+              <span id="prob-up-text">0%</span>
+            </div>
+            <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div id="prob-up-bar" class="h-full bg-blue-500 w-0 transition-all duration-100"></div>
+            </div>
+          </div>
+
+          <!-- DOWN -->
+          <div>
+            <div class="flex justify-between text-[11px] text-slate-400 mb-0.5">
+              <span>⬇️ down</span>
+              <span id="prob-down-text">0%</span>
+            </div>
+            <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div id="prob-down-bar" class="h-full bg-blue-500 w-0 transition-all duration-100"></div>
+            </div>
+          </div>
+
+          <!-- LEFT -->
+          <div>
+            <div class="flex justify-between text-[11px] text-slate-400 mb-0.5">
+              <span>⬅️ left</span>
+              <span id="prob-left-text">0%</span>
+            </div>
+            <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div id="prob-left-bar" class="h-full bg-blue-500 w-0 transition-all duration-100"></div>
+            </div>
+          </div>
+
+          <!-- RIGHT -->
+          <div>
+            <div class="flex justify-between text-[11px] text-slate-400 mb-0.5">
+              <span>➡️ right</span>
+              <span id="prob-right-text">0%</span>
+            </div>
+            <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div id="prob-right-bar" class="h-full bg-blue-500 w-0 transition-all duration-100"></div>
+            </div>
+          </div>
+
+          <!-- DEFAUT -->
+          <div>
+            <div class="flex justify-between text-[11px] text-slate-400 mb-0.5">
+              <span>⏹️ defaut</span>
+              <span id="prob-defaut-text">0%</span>
+            </div>
+            <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div id="prob-defaut-bar" class="h-full bg-slate-500 w-0 transition-all duration-100"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- On-screen Manual Direction Buttons Fallback (Useful for quick testing) -->
+      <div class="bg-slate-900/40 border border-slate-800/60 rounded-xl p-3 text-center">
+        <p class="text-[11px] text-slate-500 mb-2">鍵盤箭頭或備用點擊測試：</p>
+        <div class="grid grid-cols-3 gap-1.5 max-w-[180px] mx-auto">
+          <div></div>
+          <button onclick="simulateGesture('up')" class="bg-slate-800 hover:bg-slate-700 active:bg-blue-600 text-xs py-1.5 rounded transition">⬆️</button>
+          <div></div>
+          <button onclick="simulateGesture('left')" class="bg-slate-800 hover:bg-slate-700 active:bg-blue-600 text-xs py-1.5 rounded transition">⬅️</button>
+          <button onclick="simulateGesture('defaut')" class="bg-slate-800 hover:bg-slate-700 text-[10px] py-1.5 rounded transition">預設</button>
+          <button onclick="simulateGesture('right')" class="bg-slate-800 hover:bg-slate-700 active:bg-blue-600 text-xs py-1.5 rounded transition">➡️</button>
+          <div></div>
+          <button onclick="simulateGesture('down')" class="bg-slate-800 hover:bg-slate-700 active:bg-blue-600 text-xs py-1.5 rounded transition">⬇️</button>
+          <div></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- MODAL 1: Model Setup Modal -->
+  <div id="modal-model" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 transition-all duration-200 opacity-100">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl relative transform transition-all scale-100">
+      
+      <button onclick="closeModelModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white transition w-8 h-8 rounded-full flex items-center justify-center bg-slate-800 hover:bg-slate-700">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+
+      <div class="flex items-center space-x-3 mb-4">
+        <div class="w-10 h-10 rounded-xl bg-blue-600/20 text-blue-400 flex items-center justify-center text-xl">
+          <i class="fa-solid fa-brain"></i>
+        </div>
+        <div>
+          <h3 class="text-lg font-bold text-white">載入 Teachable Machine 模型</h3>
+          <p class="text-xs text-slate-400">請輸入或點擊按鈕載入模型</p>
+        </div>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+            TEACHABLE MACHINE 模型網址
+          </label>
+          <div class="relative">
+            <input id="input-model-url" type="text" 
+                   value="https://teachablemachine.withgoogle.com/models/IXR4xe5VY/" 
+                   placeholder="https://teachablemachine.withgoogle.com/models/..." 
+                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono pr-8">
+            <button onclick="clearUrlInput()" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs">
+              <i class="fa-solid fa-circle-xmark"></i>
+            </button>
+          </div>
+          <p class="text-[11px] text-slate-500 mt-1.5 leading-tight">
+            模型必須包含 5 個精確標籤：<code class="bg-slate-800 px-1 py-0.5 rounded text-blue-300">defaut</code>, <code class="bg-slate-800 px-1 py-0.5 rounded text-blue-300">up</code>, <code class="bg-slate-800 px-1 py-0.5 rounded text-blue-300">down</code>, <code class="bg-slate-800 px-1 py-0.5 rounded text-blue-300">left</code>, <code class="bg-slate-800 px-1 py-0.5 rounded text-blue-300">right</code>
+          </p>
+        </div>
+
+        <div id="modal-error-box" class="hidden bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs p-3 rounded-xl">
+          <i class="fa-solid fa-triangle-exclamation mr-1"></i> <span id="modal-error-msg">載入失敗</span>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-3 pt-2">
+          <button id="btn-load-custom" onclick="handleLoadCustomModel()" class="flex-1 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-bold py-3 px-4 rounded-xl transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2">
+            <i class="fa-solid fa-download"></i> <span>載入該模型</span>
+          </button>
+          <button id="btn-load-demo" onclick="handleLoadDemoModel()" class="flex-1 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 text-xs font-bold py-3 px-4 rounded-xl transition border border-slate-700 flex items-center justify-center gap-2">
+            <i class="fa-solid fa-wand-magic-sparkles text-amber-400"></i> <span>使用預設 Demo 模型</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 2: Pause Overlay -->
+  <div id="modal-pause" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 text-center shadow-2xl">
+      <div class="w-16 h-16 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-2xl mx-auto mb-4">
+        <i class="fa-solid fa-pause"></i>
+      </div>
+      <h3 class="text-xl font-bold text-white mb-1">遊戲暫停中</h3>
+      <p class="text-xs text-slate-400 mb-6">休息一下眼睛，準備好再繼續挑戰</p>
+
+      <div class="space-y-3">
+        <button onclick="togglePause()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm py-3 rounded-xl transition shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2">
+          <i class="fa-solid fa-play"></i> 繼續測驗
+        </button>
+        <button onclick="restartGame()" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm py-2.5 rounded-xl transition border border-slate-700 flex items-center justify-center gap-2">
+          <i class="fa-solid fa-rotate-right"></i> 重新開始遊戲
+        </button>
+        <button onclick="togglePause(); openModelModal();" class="w-full bg-slate-800/50 hover:bg-slate-800 text-slate-400 hover:text-slate-200 font-medium text-xs py-2 rounded-xl transition">
+          更換 Teachable Machine 模型
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 3: Game Over Result Modal -->
+  <div id="modal-result" class="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 md:p-8 text-center shadow-2xl">
+      <div id="result-icon-bg" class="w-20 h-20 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-3xl mx-auto mb-4 shadow-inner">
+        <i class="fa-solid fa-award"></i>
+      </div>
+
+      <h2 class="text-2xl font-extrabold text-white mb-1">測驗完成！</h2>
+      <p class="text-xs text-slate-400 mb-6">以下是你的 AI 視力測驗結果</p>
+
+      <div class="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 mb-6">
+        <div class="text-xs text-slate-400 mb-1">測得最高視力數值</div>
+        <div id="result-vision-score" class="text-4xl md:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400 my-1">
+          1.0
+        </div>
+        <div id="result-evaluation" class="text-xs font-semibold text-emerald-400 mt-2">
+          雙眼視力表現極佳！
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 text-left mb-6 text-xs">
+        <div class="bg-slate-800/50 p-3 rounded-xl border border-slate-800">
+          <div class="text-slate-500">總答對題數</div>
+          <div id="result-total-correct" class="text-slate-200 font-bold text-base mt-0.5">8 題</div>
+        </div>
+        <div class="bg-slate-800/50 p-3 rounded-xl border border-slate-800">
+          <div class="text-slate-500">累積總得分</div>
+          <div id="result-total-score" class="text-amber-400 font-bold text-base mt-0.5">1200</div>
+        </div>
+      </div>
+
+      <button onclick="restartGame()" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm py-3.5 rounded-xl transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2">
+        <i class="fa-solid fa-arrow-rotate-right"></i> 再測驗一次
+      </button>
+    </div>
+  </div>
+
+  <!-- Audio & Script Logic -->
+  <script>
+    // --- Global Configuration & Constants ---
+    const DEFAULT_MODEL_URL = "https://teachablemachine.withgoogle.com/models/IXR4xe5VY/";
+    const REQUIRED_LABELS = ["defaut", "up", "down", "left", "right"];
+    
+    // Snellen Vision Scale Progression
+    const VISION_LEVELS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.2, 1.5, 2.0];
+    const ROUNDS_PER_LEVEL = 2; // Exactly 2 rounds per level
+    const HOLD_REQUIRED_MS = 1200; // 1.2s holding requirement
+    const COOLDOWN_RESET_MS = 300; // Must stay in 'defaut' for 0.3s before next prompt
+
+    // Dynamic Game State Variables
+    let model = null;
+    let webcam = null;
+    let isWebcamActive = false;
+    let isGameActive = false;
+    let isPaused = false;
+    let isModelLoading = false;
+
+    let currentLevelIndex = 0;
+    let currentRoundInLevel = 1; // 1 or 2
+    let currentScore = 0;
+    let correctInCurrentLevel = 0;
+    let totalCorrect = 0;
+
+    let currentTargetDirection = "up"; // 'up', 'down', 'left', 'right'
+    let currentDetectedGesture = "defaut";
+    let holdStartTime = null;
+    let isWaitingForDefaultReset = false;
+    let defaultHoldStartTime = null;
+
+    // Web Audio Synthesizer for SFX
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playSound(type) {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      if (type === 'hold') {
+        osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.02, audioCtx.currentTime);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.05);
+      } else if (type === 'success') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+        osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.2); // A5
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.25);
+      } else if (type === 'error') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(220, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(140, audioCtx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.3);
+      }
+    }
+
+    // --- Modal Control Functions ---
+    function openModelModal() {
+      document.getElementById('modal-model').classList.remove('hidden');
+      document.getElementById('modal-error-box').classList.add('hidden');
+    }
+
+    function closeModelModal() {
+      document.getElementById('modal-model').classList.add('hidden');
+    }
+
+    function clearUrlInput() {
+      document.getElementById('input-model-url').value = '';
+    }
+
+    function showErrorInModal(msg) {
+      const errBox = document.getElementById('modal-error-box');
+      const errText = document.getElementById('modal-error-msg');
+      errText.innerText = msg;
+      errBox.classList.remove('hidden');
+    }
+
+    // --- Teachable Machine Model Loader ---
+    async function loadTeachableMachineModel(rawUrl) {
+      if (isModelLoading) return false;
+      isModelLoading = true;
+      
+      const btnCustom = document.getElementById('btn-load-custom');
+      const btnDemo = document.getElementById('btn-load-demo');
+      btnCustom.disabled = true;
+      btnDemo.disabled = true;
+      btnCustom.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 載入中...`;
+
+      try {
+        let cleanUrl = rawUrl.trim();
+        if (!cleanUrl.endsWith('/')) cleanUrl += '/';
+
+        const modelURL = cleanUrl + "model.json";
+        const metadataURL = cleanUrl + "metadata.json";
+
+        // Load the model and metadata via Teachable Machine library
+        model = await tmImage.load(modelURL, metadataURL);
+        const maxPredictions = model.getTotalClasses();
+        const classLabels = model.getClassLabels();
+
+        // Label verification logic (normalize labels to lowercase)
+        const normalizedLabels = classLabels.map(l => l.trim().toLowerCase());
+        
+        // Ensure required directions exist
+        const missing = REQUIRED_LABELS.filter(req => {
+          if (req === 'defaut') {
+            return !normalizedLabels.includes('defaut') && !normalizedLabels.includes('default');
+          }
+          return !normalizedLabels.includes(req);
+        });
+
+        if (missing.length > 0) {
+          throw new Error(`模型缺失必要類別標籤：${missing.join(', ')}`);
+        }
+
+        // Setup Webcam
+        if (!webcam) {
+          const flip = true;
+          webcam = new tmImage.Webcam(240, 240, flip);
+          await webcam.setup();
+          await webcam.play();
+          
+          const webcamContainer = document.getElementById('webcam-container');
+          webcamContainer.innerHTML = '';
+          webcamContainer.appendChild(webcam.canvas);
+          webcam.canvas.className = "w-full h-full object-cover rounded-xl";
+          isWebcamActive = true;
+        } else {
+          await webcam.play();
+        }
+
+        document.getElementById('ai-status-badge').innerText = "AI 運作中";
+        document.getElementById('ai-status-badge').className = "text-[10px] bg-emerald-500/20 text-emerald-400 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/30";
+        document.getElementById('model-btn-text').innerText = "變更模型";
+
+        closeModelModal();
+        startNewGame();
+        
+        // Start continuous inference loop
+        window.requestAnimationFrame(gameLoop);
+
+        isModelLoading = false;
+        btnCustom.disabled = false;
+        btnDemo.disabled = false;
+        btnCustom.innerHTML = `<i class="fa-solid fa-download"></i> <span>載入該模型</span>`;
+        return true;
+
+      } catch (err) {
+        console.error("Model load error:", err);
+        showErrorInModal(`模型載入失敗：${err.message || '請確認網址是否正確'}`);
+        
+        isModelLoading = false;
+        btnCustom.disabled = false;
+        btnDemo.disabled = false;
+        btnCustom.innerHTML = `<i class="fa-solid fa-download"></i> <span>載入該模型</span>`;
+        return false;
+      }
+    }
+
+    // Button Event Handlers
+    async function handleLoadCustomModel() {
+      const url = document.getElementById('input-model-url').value;
+      if (!url) {
+        showErrorInModal("請輸入有效的 Teachable Machine 模型網址");
+        return;
+      }
+      await loadTeachableMachineModel(url);
+    }
+
+    async function handleLoadDemoModel() {
+      document.getElementById('input-model-url').value = DEFAULT_MODEL_URL;
+      await loadTeachableMachineModel(DEFAULT_MODEL_URL);
+    }
+
+    // --- Game Logic Engine ---
+    function startNewGame() {
+      currentLevelIndex = 0;
+      currentRoundInLevel = 1;
+      currentScore = 0;
+      correctInCurrentLevel = 0;
+      totalCorrect = 0;
+      isGameActive = true;
+      isPaused = false;
+      isWaitingForDefaultReset = false;
+
+      document.getElementById('btn-pause').classList.remove('hidden');
+      document.getElementById('modal-result').classList.add('hidden');
+      
+      nextQuestion();
+    }
+
+    function nextQuestion() {
+      // Pick random direction: up, down, left, right
+      const directions = ["up", "down", "left", "right"];
+      currentTargetDirection = directions[Math.floor(Math.random() * directions.length)];
+
+      updateEChartDisplay();
+      updateUIStats();
+      
+      // Reset holding status
+      holdStartTime = null;
+      updateHoldProgressBar(0);
+      
+      document.getElementById('status-text').innerHTML = `請比出姿勢回答 E 的開口方向...`;
+      document.getElementById('status-text').className = "text-slate-300 font-medium text-sm md:text-base animate-pulse";
+    }
+
+    function updateEChartDisplay() {
+      const eSvg = document.getElementById('e-svg');
+      
+      // Calculate scale factor according to Snellen level (Level 0.1 is largest, Level 2.0 is smallest)
+      // Level 0.1 scale = 1.0 (fits comfortably in card without covering stats)
+      const targetLevel = VISION_LEVELS[currentLevelIndex];
+      const scaleFactor = Math.max(0.15, Math.pow(0.1 / targetLevel, 0.45));
+
+      eSvg.style.transform = `scale(${scaleFactor.toFixed(3)})`;
+
+      // Rotation according to direction
+      const rotMap = { 'right': 0, 'down': 90, 'left': 180, 'up': 270 };
+      const eSymbol = document.getElementById('e-symbol');
+      eSymbol.style.transform = `rotate(${rotMap[currentTargetDirection]}deg)`;
+    }
+
+    function updateUIStats() {
+      document.getElementById('stat-level').innerText = VISION_LEVELS[currentLevelIndex].toFixed(1);
+      document.getElementById('stat-round').innerText = `第 ${currentRoundInLevel} / ${ROUNDS_PER_LEVEL} 題`;
+      document.getElementById('stat-score').innerText = currentScore;
+    }
+
+    // --- Main Loop (Webcam Inference & Game Logic) ---
+    let lastInferenceTime = 0;
+    const INFERENCE_INTERVAL = 70; // Throttled to ~15 FPS to conserve GPU/CPU
+
+    async function gameLoop(timestamp) {
+      if (webcam && isWebcamActive) {
+        webcam.update();
+
+        // Throttle AI prediction frequency
+        if (timestamp - lastInferenceTime > INFERENCE_INTERVAL) {
+          lastInferenceTime = timestamp;
+          if (model && isGameActive && !isPaused) {
+            await predictWebcamGesture();
+          }
+        }
+      }
+
+      window.requestAnimationFrame(gameLoop);
+    }
+
+    async function predictWebcamGesture() {
+      const prediction = await model.predict(webcam.canvas);
+      
+      let topClass = "defaut";
+      let topProb = 0;
+
+      prediction.forEach(p => {
+        let label = p.className.trim().toLowerCase();
+        if (label === 'default') label = 'defaut';
+        
+        const probPct = Math.round(p.probability * 100);
+
+        // Update probability progress bars in UI
+        const bar = document.getElementById(`prob-${label}-bar`);
+        const text = document.getElementById(`prob-${label}-text`);
+        if (bar && text) {
+          bar.style.width = `${probPct}%`;
+          text.innerText = `${probPct}%`;
+        }
+
+        if (p.probability > topProb) {
+          topProb = p.probability;
+          topClass = label;
+        }
+      });
+
+      currentDetectedGesture = topClass;
+
+      // Update gesture badge
+      const badge = document.getElementById('detected-gesture-badge');
+      const badgeText = document.getElementById('current-gesture-name');
+      badge.classList.remove('hidden');
+      badgeText.innerText = `${topClass} (${Math.round(topProb * 100)}%)`;
+
+      // Handle Game Input Logic
+      handleGestureAnswerLogic(topClass, topProb);
+    }
+
+    function handleGestureAnswerLogic(gesture, confidence) {
+      if (!isGameActive || isPaused) return;
+
+      // Step 1: Anti-misfire cooldown wait for returning to 'defaut'
+      if (isWaitingForDefaultReset) {
+        if (gesture === 'defaut' && confidence >= 0.7) {
+          if (!defaultHoldStartTime) defaultHoldStartTime = Date.now();
+          if (Date.now() - defaultHoldStartTime >= COOLDOWN_RESET_MS) {
+            isWaitingForDefaultReset = false;
+            defaultHoldStartTime = null;
+            nextQuestion();
+          }
+        } else {
+          defaultHoldStartTime = null;
+        }
+        return;
+      }
+
+      // Step 2: Direction Answer Holding Evaluation (1.2 Seconds requirement)
+      if (['up', 'down', 'left', 'right'].includes(gesture) && confidence >= 0.82) {
+        if (!holdStartTime) {
+          holdStartTime = Date.now();
+        } else {
+          const elapsed = Date.now() - holdStartTime;
+          const progressPct = Math.min(100, (elapsed / HOLD_REQUIRED_MS) * 100);
+          updateHoldProgressBar(progressPct);
+
+          if (elapsed % 300 < 50) playSound('hold');
+
+          // Hold duration achieved!
+          if (elapsed >= HOLD_REQUIRED_MS) {
+            submitAnswer(gesture);
+          }
+        }
+      } else {
+        // Reset holding if gesture changes or confidence drops
+        holdStartTime = null;
+        updateHoldProgressBar(0);
+      }
+    }
+
+    function updateHoldProgressBar(pct) {
+      const container = document.getElementById('hold-progress-bar-container');
+      const bar = document.getElementById('hold-progress-bar');
+      if (pct > 0) {
+        container.classList.remove('hidden');
+        bar.style.width = `${pct}%`;
+      } else {
+        container.classList.add('hidden');
+        bar.style.width = '0%';
+      }
+    }
+
+    function simulateGesture(dir) {
+      if (!isGameActive || isPaused) return;
+      if (dir === 'defaut') {
+        isWaitingForDefaultReset = false;
+        return;
+      }
+      submitAnswer(dir);
+    }
+
+    function submitAnswer(userAnswer) {
+      holdStartTime = null;
+      updateHoldProgressBar(0);
+
+      const isCorrect = (userAnswer === currentTargetDirection);
+      const statusText = document.getElementById('status-text');
+
+      if (isCorrect) {
+        playSound('success');
+        correctInCurrentLevel++;
+        totalCorrect++;
+        currentScore += Math.round(VISION_LEVELS[currentLevelIndex] * 100);
+        
+        statusText.innerHTML = `<span class="text-emerald-400 font-bold text-lg"><i class="fa-solid fa-circle-check"></i> 回答正確！</span>`;
+      } else {
+        playSound('error');
+        statusText.innerHTML = `<span class="text-rose-400 font-bold text-lg"><i class="fa-solid fa-circle-xmark"></i> 回答錯誤！</span>`;
+      }
+
+      updateUIStats();
+
+      // Check level progression (2 rounds per level)
+      if (currentRoundInLevel < ROUNDS_PER_LEVEL) {
+        currentRoundInLevel++;
+        triggerCooldownAndNext();
+      } else {
+        // Level complete! Check advancement
+        if (correctInCurrentLevel >= 1) { // 1 or 2 correct out of 2 allows progression
+          if (currentLevelIndex < VISION_LEVELS.length - 1) {
+            currentLevelIndex++;
+            currentRoundInLevel = 1;
+            correctInCurrentLevel = 0;
+            triggerCooldownAndNext();
+          } else {
+            // Reached maximum vision level!
+            finishGame(true);
+          }
+        } else {
+          // Failed both questions at current level -> Game Over
+          finishGame(false);
+        }
+      }
+    }
+
+    function triggerCooldownAndNext() {
+      isWaitingForDefaultReset = true;
+      defaultHoldStartTime = null;
+      document.getElementById('status-text').innerHTML += `<div class="text-xs text-slate-400 mt-1">請歸位至預設姿勢 (defaut) 以進行下一題...</div>`;
+    }
+
+    function togglePause() {
+      if (!isGameActive) return;
+      isPaused = !isPaused;
+      const pauseModal = document.getElementById('modal-pause');
+      if (isPaused) {
+        pauseModal.classList.remove('hidden');
+      } else {
+        pauseModal.classList.add('hidden');
+      }
+    }
+
+    function restartGame() {
+      document.getElementById('modal-pause').classList.add('hidden');
+      document.getElementById('modal-result').classList.add('hidden');
+      startNewGame();
+    }
+
+    function finishGame(completedAll) {
+      isGameActive = false;
+      document.getElementById('btn-pause').classList.add('hidden');
+
+      const resultModal = document.getElementById('modal-result');
+      const finalVision = VISION_LEVELS[currentLevelIndex].toFixed(1);
+      
+      document.getElementById('result-vision-score').innerText = finalVision;
+      document.getElementById('result-total-correct').innerText = `${totalCorrect} 題`;
+      document.getElementById('result-total-score').innerText = currentScore;
+
+      const evalText = document.getElementById('result-evaluation');
+      const iconBg = document.getElementById('result-icon-bg');
+
+      if (parseFloat(finalVision) >= 1.0) {
+        evalText.innerText = "雙眼視力表現極佳！請繼續保持！";
+        evalText.className = "text-xs font-semibold text-emerald-400 mt-2";
+        iconBg.className = "w-20 h-20 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-3xl mx-auto mb-4 shadow-inner";
+      } else if (parseFloat(finalVision) >= 0.6) {
+        evalText.innerText = "視力表現正常，注意眼睛定期休息喔！";
+        evalText.className = "text-xs font-semibold text-blue-400 mt-2";
+        iconBg.className = "w-20 h-20 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-3xl mx-auto mb-4 shadow-inner";
+      } else {
+        evalText.innerText = "測驗結果較低，建議尋求專業眼科檢查。";
+        evalText.className = "text-xs font-semibold text-amber-400 mt-2";
+        iconBg.className = "w-20 h-20 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center text-3xl mx-auto mb-4 shadow-inner";
+      }
+
+      resultModal.classList.remove('hidden');
+    }
+
+    // Keyboard Shortcuts Listener
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowUp') simulateGesture('up');
+      if (e.key === 'ArrowDown') simulateGesture('down');
+      if (e.key === 'ArrowLeft') simulateGesture('left');
+      if (e.key === 'ArrowRight') simulateGesture('right');
+      if (e.key === ' ') togglePause();
+    });
+
+    // Auto open settings modal on load
+    window.onload = function() {
+      openModelModal();
+    };
+  </script>
+</body>
+</html>
